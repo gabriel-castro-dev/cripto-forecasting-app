@@ -1,8 +1,6 @@
 import logging
-import time
 from typing import Optional
 import pandas as pd
-from config import MAX_RETRIES, RETRY_DELAY
 from services.binance_market_data_service import BinanceMarketService
 
 logger = logging.getLogger(__name__)
@@ -10,27 +8,24 @@ logger = logging.getLogger(__name__)
 
 class MarketDataController:
     """
-    Controlador responsável por transformação e tratamento de dados de mercado.
+    Controlador responsavel por orquestracao de dados de mercado.
     
-    Converte respostas brutas da API Binance em DataFrames estruturados:
-    - Type casting apropriado (int, float, datetime)
-    - Validação de dados
-    - Retry logic com fallback
-    - Tratamento de erros específicos
+    Delega toda a logica de transformacao, retry e validacao para o servico.
+    O controller apenas orquestra as chamadas aos servicos.
     
     Attributes:
-        market_data_service: Instância de BinanceMarketService (injetada)
+        market_data_service: Instancia de BinanceMarketService (injetada)
     """
     
     def __init__(self, market_data_service: BinanceMarketService) -> None:
         """
-        Inicializa o controller com dependência injetada.
+        Inicializa o controller com dependencia injetada.
         
         Args:
-            market_data_service: Serviço de dados de mercado (DI)
+            market_data_service: Servico de dados de mercado (DI)
         
         Raises:
-            Exception: Se falhar na inicialização
+            Exception: Se falhar na inicializacao
         """
         try:
             self.market_data_service: BinanceMarketService = market_data_service
@@ -44,109 +39,49 @@ class MarketDataController:
         Verifica conectividade com a API Binance.
         
         Returns:
-            Mensagem indicando status da conexão
+            Mensagem indicando status da conexao
         """
-        resultado = self.market_data_service.ping()
-        if resultado == {}:
-            logger.debug("API Binance está acessível")
-            return "Binance API is reachable."
-        else:
-            logger.warning(f"Erro ao fazer ping: {resultado}")
-            return resultado
+        return self.market_data_service.ping()
             
-        
     def server_time(self) -> dict:
         """
-        Obtém o tempo do servidor Binance.
+        Obtem o tempo do servidor Binance.
         
         Returns:
-            Dict com informações de tempo ou erro
+            Dict com informacoes de tempo ou erro
         """
         return self.market_data_service.server_time()
 
     def system_status(self) -> dict:
         """
-        Obtém status do sistema Binance.
+        Obtem status do sistema Binance.
         
         Returns:
-            Dict com informações de status ou erro
+            Dict com informacoes de status ou erro
         """
         return self.market_data_service.system_status()
 
     def get_tickers(self) -> pd.DataFrame:
         """
-        Obtém lista de todos os tickers com pares USDT, ordenados por preço.
+        Obtem lista de todos os tickers com pares USDT, ordenados por preco.
         
         Returns:
             DataFrame com tickers USDT ordenados ou DataFrame vazio se falhar
         """
-        for attempt in range(MAX_RETRIES):
-            data = self.market_data_service.get_tickers()
-            if isinstance(data, list) and len(data) > 0:
-                df = pd.DataFrame(data)
-                usdt_tickers = df[df['symbol'].str.endswith('USDT')].copy()
-                usdt_tickers['price'] = usdt_tickers['price'].astype(float, errors='ignore').round(2).dropna()
-                usdt_tickers = usdt_tickers.sort_values(by='price', ascending=False).reset_index(drop=True)
-                logger.info(f"Obtidos {len(usdt_tickers)} tickers USDT")
-                return usdt_tickers
-
-            elif not data or isinstance(data, str):      
-                if ("APIError(code=-2015)" in data):
-                    logger.error("Erro de permissão ao obter tickers")
-                    raise PermissionError(f"Failed to retrieve tickers, user doesn't have permission to do this request.")                  
-                logger.warning(f"[Tentativa {attempt + 1}/{MAX_RETRIES}] {data} - verificando conectividade")
-                status = self.ping()
-                if status != "Binance API is reachable.":
-                    logger.warning(f"Problema de conectividade detectado: {status}. Aguardando {RETRY_DELAY}s...")
-                    time.sleep(RETRY_DELAY)                                      
-
-        logger.error("Falha ao obter tickers após todas as tentativas")
-        return pd.DataFrame()    
+        return self.market_data_service.get_tickers()
             
     def get_ticker_24hr(self) -> pd.DataFrame:
         """
-        Obtém dados de 24h dos pares USDT.
+        Obtem dados de 24h dos pares USDT.
         
         Returns:
             DataFrame com dados 24h ou DataFrame vazio se falhar
         """
-        for attempt in range(MAX_RETRIES):
-            df_tickers = self.get_tickers()
-            if df_tickers.empty:
-                logger.error("Não foi possível obter a lista de símbolos base.")
-                return pd.DataFrame()
-            symbols = df_tickers['symbol'].tolist()
-            data_list = []
-            for symbol in symbols:
-                    data = self.market_data_service.get_ticker_24hr(symbol=symbol) 
-                    if isinstance(data, dict):
-                        data_list.append(data)
-                    elif not data or isinstance(data, str):
-                        if ("APIError(code=-2015)" in data):
-                            logger.error(f"Erro de permissão para {symbol}")
-                            raise PermissionError(f"Failed to retrieve last 24hrs ticker for {symbol}, user doesn't have permission to do this request.")
-                        if ("APIError(code=-1100)" in data or "APIError(code=-1121)" in data):
-                            logger.error(f"Símbolo inválido: {symbol}")
-                            raise KeyError(f"Failed to get ticker 24hr for {symbol}, invalid symbol provided.")   
-                        logger.warning(f"[Tentativa {attempt + 1}/{MAX_RETRIES}] {data} - verificando conectividade")
-                        status = self.ping()
-                        if status != "Binance API is reachable.":
-                            logger.warning(f"Problema de conectividade. Aguardando {RETRY_DELAY}s...")
-                            time.sleep(RETRY_DELAY)                                      
-            df = pd.DataFrame(data_list)
-            ignorar_colunas = ['symbol', 'openTime', 'closeTime', 'firstId', 'lastId', 'count']
-            cols_to_numeric = [col for col in df.columns if col not in ignorar_colunas]
-            df[cols_to_numeric] = df[cols_to_numeric].astype(float, errors='ignore').round(8).dropna()
-            df['openTime'] = pd.to_datetime(df['openTime'], unit='ms')
-            df['closeTime'] = pd.to_datetime(df['closeTime'], unit='ms')
-            df[['symbol', 'firstId', 'lastId']] = df[['symbol', 'firstId', 'lastId']].astype(str)
-            df['count'] = df['count'].astype(int)
-            logger.info(f"Dados 24h obtidos para {len(symbols)} símbolos")
-            return df    
+        return self.market_data_service.get_ticker_24hr()
     
     def get_orderbook_tickers(self, symbol: str) -> pd.DataFrame:
         """
-        Obtém informações de order book de um par.
+        Obtem informacoes de order book de um par.
         
         Args:
             symbol: Par de moedas (ex: 'BTCUSDT')
@@ -154,33 +89,11 @@ class MarketDataController:
         Returns:
             DataFrame com dados de order book ou DataFrame vazio se falhar
         """
-        for attempt in range(MAX_RETRIES):
-            data = self.market_data_service.get_orderbook_tickers(symbol=symbol)
-            if isinstance(data, dict):
-                df = pd.DataFrame([data])
-                df['symbol'] = df['symbol'].astype(str)
-                df[['bidPrice', 'bidQty', 'askPrice', 'askQty']] = df[['bidPrice', 'bidQty', 'askPrice', 'askQty']].astype(float, errors='ignore').round(8).dropna()   
-                logger.info(f"Order book obtido para {symbol}")
-                return df
-            elif not data or isinstance(data, str):
-                if ("APIError(code=-2015)" in data):
-                    logger.error(f"Erro de permissão para {symbol}")
-                    raise PermissionError(f"Failed to retrieve orderbook tickers for {symbol}, user doesn't have permission to do this request.")
-                if ("APIError(code=-1100)" in data or "APIError(code=-1121)" in data):
-                    logger.error(f"Símbolo inválido: {symbol}")
-                    raise KeyError(f"Failed to retrieve orderbook tickers for {symbol}, invalid symbol provided.")   
-                logger.warning(f"[Tentativa {attempt + 1}/{MAX_RETRIES}] {data} - verificando conectividade")
-                status = self.ping()
-                if status != "Binance API is reachable.":
-                    logger.warning(f"Problema de conectividade. Aguardando {RETRY_DELAY}s...")
-                    time.sleep(RETRY_DELAY) 
-
-        logger.error(f"Falha ao obter order book para {symbol}")
-        return pd.DataFrame()        
+        return self.market_data_service.get_orderbook_tickers(symbol=symbol)
     
     def get_klines(self, symbol: str, interval: str) -> pd.DataFrame:
         """
-        Obtém K-lines (velas) em tempo real de um par.
+        Obtem K-lines (velas) em tempo real de um par.
         
         Args:
             symbol: Par de moedas (ex: 'BTCUSDT')
@@ -189,92 +102,29 @@ class MarketDataController:
         Returns:
             DataFrame com OHLCV ou DataFrame vazio se falhar
         """
-        for attempt in range(MAX_RETRIES):
-            data = self.market_data_service.get_klines(symbol=symbol, interval=interval)
-            if isinstance(data, list) and len(data) > 0:
-                columns = ['Open_Time', 'Open', 'High', 'Low', 'Close', 'Volume',
-                          'Close_Time', 'Quote_Asset_Volume', 'Number_of_Trades',
-                          'Taker_Buy_Base_Asset_Volume', 'Taker_Buy_Quote_Asset_Volume', 'Ignore']
-                df = pd.DataFrame(data=data, columns=columns)
-                df = df.drop(columns=['Ignore'])
-                df['Open_Time'] = pd.to_datetime(df['Open_Time'], unit='ms')
-                df['Close_Time'] = pd.to_datetime(df['Close_Time'], unit='ms')
-                df['Number_of_Trades'] = df['Number_of_Trades'].astype(int)
-                df[['Open', 'High', 'Low', 'Close', 'Volume', 'Quote_Asset_Volume', 
-                    'Taker_Buy_Base_Asset_Volume', 'Taker_Buy_Quote_Asset_Volume']] = df[['Open', 'High', 'Low', 'Close', 'Volume', 'Quote_Asset_Volume',
-                        'Taker_Buy_Base_Asset_Volume', 'Taker_Buy_Quote_Asset_Volume']].apply(
-                            pd.to_numeric, errors='coerce').round(8).dropna()   
-                logger.info(f"Obtidas {len(df)} k-lines para {symbol} ({interval})")
-                return df
-            elif not data or isinstance(data, str):
-                if ("APIError(code=-2015)" in data):
-                    logger.error(f"Erro de permissão para {symbol}")
-                    raise PermissionError(f"Failed to retrieve last klines for {symbol}, user doesn't have permission to do this request.")       
-                if ("APIError(code=-1100)" in data or "APIError(code=-1121)" in data):
-                    logger.error(f"Parâmetro inválido para {symbol}")
-                    raise KeyError(f"Failed to retrieve klines for {symbol}, invalid parameter provided.")      
-                logger.warning(f"[Tentativa {attempt + 1}/{MAX_RETRIES}] {data} - verificando conectividade")
-                status = self.ping()
-                if status != "Binance API is reachable.":
-                    logger.warning(f"Problema de conectividade. Aguardando {RETRY_DELAY}s...")
-                    time.sleep(RETRY_DELAY) 
-
-        logger.error(f"Falha ao obter k-lines para {symbol}")
-        return pd.DataFrame()        
+        return self.market_data_service.get_klines(symbol=symbol, interval=interval)
     
     def get_historical_klines(self, symbol: str, interval: str, start_str: str, 
                              end_str: Optional[str] = None, limit: int = 1000) -> pd.DataFrame:
         """
-        Obtém K-lines históricas de um período específico.
+        Obtem K-lines historicas de um periodo especifico.
         
         Args:
             symbol: Par de moedas (ex: 'BTCUSDT')
             interval: Intervalo (ex: '1h', '1d')
             start_str: Data inicial (ex: '10 days ago UTC')
             end_str: Data final (opcional)
-            limit: Número máximo de registros
+            limit: Numero maximo de registros
         
         Returns:
-            DataFrame com k-lines históricas ou DataFrame vazio se falhar
+            DataFrame com k-lines historicas ou DataFrame vazio se falhar
         """
-        for attempt in range(MAX_RETRIES):
-            data = self.market_data_service.get_historical_klines(symbol=symbol, interval=interval, 
-                                                start_str=start_str, end_str=end_str, limit=limit)
-            if isinstance(data, list) and len(data) > 0:
-                columns = ['Open_Time', 'Open', 'High', 'Low', 'Close', 'Volume',
-                          'Close_Time', 'Quote_Asset_Volume', 'Number_of_Trades',
-                          'Taker_Buy_Base_Asset_Volume', 'Taker_Buy_Quote_Asset_Volume', 'Ignore']
-                df = pd.DataFrame(data=data, columns=columns)
-                df = df.drop(columns=['Ignore'])
-                df['Open_Time'] = pd.to_datetime(df['Open_Time'], unit='ms').dt.strftime('%d/%m/%Y %H:%M:%S')
-                df['Close_Time'] = pd.to_datetime(df['Close_Time'], unit='ms').dt.strftime('%d/%m/%Y %H:%M:%S')
-                df['Number_of_Trades'] = df['Number_of_Trades'].astype(int)
-                df[['Open', 'High', 'Low', 'Close', 'Volume', 'Quote_Asset_Volume',
-                    'Taker_Buy_Base_Asset_Volume', 'Taker_Buy_Quote_Asset_Volume']] = \
-                    df[['Open', 'High', 'Low', 'Close', 'Volume', 'Quote_Asset_Volume',
-                        'Taker_Buy_Base_Asset_Volume', 'Taker_Buy_Quote_Asset_Volume']].astype(
-                            float, errors='ignore').round(8).dropna()
-                logger.info(f"Obtidas {len(df)} k-lines históricas para {symbol}")
-                return df
-            elif not data or isinstance(data, str):             
-                if ("APIError(code=-2015)" in data):
-                    logger.error(f"Erro de permissão para {symbol}")
-                    raise PermissionError(f"Failed to retrieve historical klines for {symbol}, user doesn't have permission to do this request.")
-                if ("APIError(code=-1100)" in data or "APIError(code=-1121)" in data):
-                    logger.error("Parâmetro inválido em k-lines históricas")
-                    raise KeyError("Failed to retrieve historical klines, invalid parameter provided.")
-                logger.warning(f"[Tentativa {attempt + 1}/{MAX_RETRIES}] {data} - verificando conectividade")
-                status = self.ping()
-                if status != "Binance API is reachable.":
-                    logger.warning(f"Problema de conectividade. Aguardando {RETRY_DELAY}s...")
-                    time.sleep(RETRY_DELAY) 
-        
-        logger.error(f"Falha ao obter k-lines históricas para {symbol}")
-        return pd.DataFrame()        
+        return self.market_data_service.get_historical_klines(symbol=symbol, interval=interval,
+                                                              start_str=start_str, end_str=end_str, limit=limit)
 
     def get_historical_klines_generator(self, symbol: str, interval: str, timestamp: str) -> pd.DataFrame:
         """
-        Obtém K-lines históricas usando generator (eficiente para grandes volumes).
+        Obtem K-lines historicas usando generator (eficiente para grandes volumes).
         
         Args:
             symbol: Par de moedas (ex: 'BTCUSDT')
@@ -284,152 +134,49 @@ class MarketDataController:
         Returns:
             DataFrame com k-lines geradas ou DataFrame vazio se falhar
         """
-        for attempt in range(MAX_RETRIES):
-            data = self.market_data_service.get_historical_klines_generator(symbol=symbol, interval=interval, 
-                                                timestamp=timestamp)
-            data = list(data)
-            if isinstance(data, list) and len(data) > 0:
-                df = pd.DataFrame(data=data)
-                df = df.drop(columns=['Ignore'])
-                df['Open_Time'] = pd.to_datetime(df['Open_Time'], unit="ms").dt.strftime('%d/%m/%Y %H:%M:%S')
-                df['Close_Time'] = pd.to_datetime(df['Close_Time'], unit="ms").dt.strftime('%d/%m/%Y %H:%M:%S')
-                df['Number_of_Trades'] = df['Number_of_Trades'].astype(int)
-                df[['Open', 'High', 'Low', 'Close', 'Volume', 'Quote_Asset_Volume',
-                    'Taker_Buy_Base_Asset_Volume', 'Taker_Buy_Quote_Asset_Volume']] = \
-                    df[['Open', 'High', 'Low', 'Close', 'Volume', 'Quote_Asset_Volume',
-                        'Taker_Buy_Base_Asset_Volume', 'Taker_Buy_Quote_Asset_Volume']].astype(
-                            float, errors='ignore').round(8).dropna()
-                logger.info(f"Geradas {len(df)} k-lines históricas para {symbol} via generator")
-                return df
-            elif not data or isinstance(data, str):             
-                if ("APIError(code=-2015)" in data):
-                    logger.error(f"Erro de permissão para {symbol}")
-                    raise PermissionError(f"Failed to retrieve historical klines generator for {symbol}, user doesn't have permission to do this request.")
-                if ("APIError(code=-1100)" in data or "APIError(code=-1121)" in data):
-                    logger.error("Parâmetro inválido em generator de k-lines")
-                    raise KeyError("Failed to retrieve historical klines generator, invalid parameter provided.")
-                logger.warning(f"[Tentativa {attempt + 1}/{MAX_RETRIES}] {data} - verificando conectividade")
-                status = self.ping()
-                if status != "Binance API is reachable.":
-                    logger.warning(f"Problema de conectividade. Aguardando {RETRY_DELAY}s...")
-                    time.sleep(RETRY_DELAY) 
-        
-        logger.error(f"Falha ao gerar k-lines históricas para {symbol}")
-        return pd.DataFrame()        
+        return self.market_data_service.get_historical_klines_generator(symbol=symbol, interval=interval,
+                                                                        timestamp=timestamp)
 
     def get_avg_price(self, symbol: str) -> pd.DataFrame:
         """
-        Obtém preço médio de um par.
+        Obtem preco medio de um par.
         
         Args:
             symbol: Par de moedas (ex: 'BTCUSDT')
         
         Returns:
-            DataFrame com preço médio ou DataFrame vazio se falhar
+            DataFrame com preco medio ou DataFrame vazio se falhar
         """
-        for attempt in range(MAX_RETRIES):
-            data = self.market_data_service.get_avg_price(symbol=symbol)
-            if isinstance(data, dict):
-                df = pd.DataFrame([data])
-                df['mins'] = df['mins'].astype(str)
-                df["price"] = df["price"].astype(float, errors='ignore').round(2).dropna()
-                df['closeTime'] = pd.to_datetime(df['closeTime'], unit="ms").dt.strftime('%d/%m/%Y %H:%M:%S')
-                logger.info(f"Preço médio obtido para {symbol}")
-                return df
-            elif not data or isinstance(data, str):
-                if ("APIError(code=-2015)" in data):
-                    logger.error(f"Erro de permissão para {symbol}")
-                    raise PermissionError(f"Failed to retrieve average prices {symbol}, user doesn't have permission to do this request.")
-                if ("APIError(code=-1100)" in data or "APIError(code=-1121)" in data):
-                    logger.error(f"Símbolo inválido: {symbol}")
-                    raise KeyError(f"Failed to retrieve average prices for {symbol}, invalid symbol provided.")   
-                logger.warning(f"[Tentativa {attempt + 1}/{MAX_RETRIES}] {data} - verificando conectividade")
-                status = self.ping()
-                if status != "Binance API is reachable.":
-                    logger.warning(f"Problema de conectividade. Aguardando {RETRY_DELAY}s...")
-                    time.sleep(RETRY_DELAY) 
-
-        logger.error(f"Falha ao obter preço médio para {symbol}")
-        return pd.DataFrame()        
+        return self.market_data_service.get_avg_price(symbol=symbol)
     
-    def get_recent_trades(self, symbol: str, limit: None) -> pd.DataFrame:
+    def get_recent_trades(self, symbol: str, limit: Optional[int] = None) -> pd.DataFrame:
         """
-        Obtém trades recentes de um par.
+        Obtem trades recentes de um par.
         
         Args:
             symbol: Par de moedas (ex: 'BTCUSDT')
+            limit: Numero maximo de trades
         
         Returns:
             DataFrame com trades recentes ou DataFrame vazio se falhar
         """
-        for attempt in range(MAX_RETRIES):
-            data = self.market_data_service.get_recent_trades(symbol=symbol, limit=limit)
-            if isinstance(data, list):
-                df = pd.DataFrame(data)
-                df['id'] = df['id'].astype(int)
-                df["price"] = df["price"].astype(float, errors='ignore').round(2).dropna()
-                df[['qty', 'quoteQty']] = df[['qty', 'quoteQty']].astype(float, errors='ignore').round(8).dropna()
-                df['time'] = pd.to_datetime(df['time'], unit="ms").dt.strftime('%d/%m/%Y %H:%M:%S')
-                df[['isBuyerMaker', 'isBestMatch']] = df[['isBuyerMaker', 'isBestMatch']].astype(bool, errors='ignore') 
-                logger.info(f"Obtidos {len(df)} trades recentes para {symbol}")
-                return df
-            elif not data or isinstance(data, str):
-                if ("APIError(code=-2015)" in data):
-                    logger.error(f"Erro de permissão para {symbol}")
-                    raise PermissionError(f"Failed to retrieve recent trades for {symbol}, user doesn't have permission to do this request.")
-                if ("APIError(code=-1100)" in data or "APIError(code=-1121)" in data):
-                    logger.error(f"Símbolo inválido: {symbol}")
-                    raise KeyError(f"Failed to retrieve recent trades for {symbol}, invalid symbol provided.")   
-                logger.warning(f"[Tentativa {attempt + 1}/{MAX_RETRIES}] {data} - verificando conectividade")
-                status = self.ping()
-                if status != "Binance API is reachable.":
-                    logger.warning(f"Problema de conectividade. Aguardando {RETRY_DELAY}s...")
-                    time.sleep(RETRY_DELAY) 
-
-        logger.error(f"Falha ao obter trades recentes para {symbol}")
-        return pd.DataFrame()        
+        return self.market_data_service.get_recent_trades(symbol=symbol, limit=limit)
     
     def get_historical_trades(self, symbol: str) -> pd.DataFrame:
         """
-        Obtém histórico de trades de um par.
+        Obtem historico de trades de um par.
         
         Args:
             symbol: Par de moedas (ex: 'BTCUSDT')
         
         Returns:
-            DataFrame com trades históricos ou DataFrame vazio se falhar
+            DataFrame com trades historicos ou DataFrame vazio se falhar
         """
-        for attempt in range(MAX_RETRIES):
-            data = self.market_data_service.get_historical_trades(symbol=symbol)
-            if isinstance(data, list):
-                df = pd.DataFrame(data)
-                df['id'] = df['id'].astype(int)
-                df = df.drop_duplicates(subset=['id']).reset_index(drop=True).set_index('id')
-                df["price"] = df["price"].astype(float, errors='ignore').round(2).dropna()
-                df[['qty', 'quoteQty']] = df[['qty', 'quoteQty']].astype(float, errors='ignore').round(8).dropna()
-                df['time'] = pd.to_datetime(df['time'], unit="ms").dt.strftime('%d/%m/%Y %H:%M:%S')
-                df[['isBuyerMaker', 'isBestMatch']] = df[['isBuyerMaker', 'isBestMatch']].astype(bool, errors='ignore') 
-                logger.info(f"Obtidos {len(df)} trades históricos para {symbol}")
-                return df
-            elif not data or isinstance(data, str):
-                if ("APIError(code=-2015)" in data):
-                    logger.error(f"Erro de permissão para {symbol}")
-                    raise PermissionError(f"Failed to retrieve historical trades for {symbol}, user doesn't have permission to do this request.")
-                if ("APIError(code=-1100)" in data or "APIError(code=-1121)" in data):
-                    logger.error(f"Símbolo inválido: {symbol}")
-                    raise KeyError(f"Failed to retrieve historical trades for {symbol}, invalid symbol provided.")   
-                logger.warning(f"[Tentativa {attempt + 1}/{MAX_RETRIES}] {data} - verificando conectividade")
-                status = self.ping()
-                if status != "Binance API is reachable.":
-                    logger.warning(f"Problema de conectividade. Aguardando {RETRY_DELAY}s...")
-                    time.sleep(RETRY_DELAY) 
-
-        logger.error(f"Falha ao obter trades históricos para {symbol}")
-        return pd.DataFrame()        
+        return self.market_data_service.get_historical_trades(symbol=symbol)
     
     def get_aggregate_trades(self, symbol: str) -> pd.DataFrame:
         """
-        Obtém agregação de trades de um par.
+        Obtem agregacao de trades de um par.
         
         Args:
             symbol: Par de moedas (ex: 'BTCUSDT')
@@ -437,41 +184,11 @@ class MarketDataController:
         Returns:
             DataFrame com trades agregados ou DataFrame vazio se falhar
         """
-        for attempt in range(MAX_RETRIES):
-            data = self.market_data_service.get_aggregate_trades(symbol=symbol)
-            if isinstance(data, list):
-                df = pd.DataFrame(data)
-                df = df.rename(columns={"a":"Aggregate_Trade_Id", "p": "price", "q": "Quantity", 
-                                   "f":"First_Trade_Id", "l": "Last_Trade_Id","T": 
-                                   "TimeStamp", "m": "isBuyerMaker", "M":"isBestMatch"})
-                df['Aggregate_Trade_Id'] = df['Aggregate_Trade_Id'].astype(int)
-                df = df.drop_duplicates(subset=['Aggregate_Trade_Id']).reset_index(drop=True).set_index('Aggregate_Trade_Id')
-                df["price"] = df["price"].astype(float, errors='ignore').round(2).dropna()
-                df['Quantity'] = df['Quantity'].astype(float, errors='ignore').round(8).dropna()
-                df[['First_Trade_Id','Last_Trade_Id']] = df[['First_Trade_Id','Last_Trade_Id']].astype(int)
-                df['TimeStamp'] = pd.to_datetime(df['TimeStamp'], unit="ms").dt.strftime('%d/%m/%Y %H:%M:%S')
-                df[['isBuyerMaker', 'isBestMatch']] = df[['isBuyerMaker', 'isBestMatch']].astype(bool, errors='ignore') 
-                logger.info(f"Obtidos {len(df)} trades agregados para {symbol}")
-                return df
-            elif not data or isinstance(data, str):
-                if ("APIError(code=-2015)" in data):
-                    logger.error(f"Erro de permissão para {symbol}")
-                    raise PermissionError(f"Failed to retrieve aggregate trades for {symbol}, user doesn't have permission to do this request.")
-                if ("APIError(code=-1100)" in data or "APIError(code=-1121)" in data):
-                    logger.error(f"Símbolo inválido: {symbol}")
-                    raise KeyError(f"Failed to retrieve aggregate trades for {symbol}, invalid symbol provided.")   
-                logger.warning(f"[Tentativa {attempt + 1}/{MAX_RETRIES}] {data} - verificando conectividade")
-                status = self.ping()
-                if status != "Binance API is reachable.":
-                    logger.warning(f"Problema de conectividade. Aguardando {RETRY_DELAY}s...")
-                    time.sleep(RETRY_DELAY) 
-
-        logger.error(f"Falha ao obter trades agregados para {symbol}")
-        return pd.DataFrame()        
+        return self.market_data_service.get_aggregate_trades(symbol=symbol)
     
     def get_depth(self, symbol: str) -> pd.DataFrame:
         """
-        Obtém profundidade de mercado (order book depth) de um par.
+        Obtem profundidade de mercado (order book depth) de um par.
         
         Args:
             symbol: Par de moedas (ex: 'BTCUSDT')
@@ -479,33 +196,4 @@ class MarketDataController:
         Returns:
             DataFrame com profundidade ou DataFrame vazio se falhar
         """
-        for attempt in range(MAX_RETRIES):
-            data = self.market_data_service.get_depth(symbol=symbol)
-            if isinstance(data, dict):
-                update_id = data.get('lastUpdateId')
-                df_bids = pd.DataFrame(data['bids'], columns=['price', 'quantity'])
-                df_bids['side'] = 'bid'
-                df_asks = pd.DataFrame(data['asks'], columns=['price', 'quantity'])
-                df_asks['side'] = 'ask'
-                df_full = pd.concat([df_bids, df_asks], ignore_index=True)
-                df_full['lastUpdateId'] = update_id
-                df_full[['price', 'quantity']] = df_full[['price', 'quantity']].astype(float)
-                logger.info(f"Profundidade de mercado obtida para {symbol}")
-                return df_full
-            elif not data or isinstance(data, str):
-                if ("APIError(code=-2015)" in data):
-                    logger.error(f"Erro de permissão para {symbol}")
-                    raise PermissionError(f"Failed to get depth for {symbol}, user doesn't have permission to do this request.")
-                if ("APIError(code=-1100)" in data or "APIError(code=-1121)" in data):
-                    logger.error(f"Símbolo inválido: {symbol}")
-                    raise KeyError(f"Failed to get depth for {symbol}, invalid symbol provided.")   
-                logger.warning(f"[Tentativa {attempt + 1}/{MAX_RETRIES}] {data} - verificando conectividade")
-                status = self.ping()
-                if status != "Binance API is reachable.":
-                    logger.warning(f"Problema de conectividade. Aguardando {RETRY_DELAY}s...")
-                    time.sleep(RETRY_DELAY) 
-
-        logger.error(f"Falha ao obter profundidade de mercado para {symbol}")
-        return pd.DataFrame()
-
-   
+        return self.market_data_service.get_depth(symbol=symbol)

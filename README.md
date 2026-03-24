@@ -21,21 +21,21 @@ Projeto estruturado em **3 camadas** seguindo o padrão de separação de respon
 └────────────────┬────────────────────┘
                  │
 ┌────────────────▼─────────────────────────────────┐
-│  Controllers (Transformação & Tratamento)        │
+│  Controllers (Orquestracao)                      │
 │  • market_data_controller.py                     │
 │  • account_history_controller.py                 │
 │  • controllers_manager.py                        │
 └────────────────┬────────────────────────────────┘
                  │
-┌────────────────▼────────────────────────────────┐
-│  Services (Requisições API)                     │
+┌────────────────▼─────────────────────────────────┐
+│  Services (Logica de Negocio)                   │
 │  • binance_market_data_service.py               │
 │  • binance_account_history_service.py           │
 │  • services_manager.py                          │
 └────────────────┬────────────────────────────────┘
                  │
 ┌────────────────▼────────────────────────────────┐
-│  Environment & Configuração                     │
+│  Environment & Configuracao                     │
 │  • env/keys.py (Credenciais & API Keys)         │
 └─────────────────────────────────────────────────┘
 ```
@@ -44,10 +44,10 @@ Projeto estruturado em **3 camadas** seguindo o padrão de separação de respon
 
 | Camada | Responsabilidade | Arquivos |
 |--------|-----------------|----------|
-| **Services** | Requisições à API Binance, retorno de dados brutos | `binance_*_service.py` |
-| **Controllers** | Transformação em DataFrames, tratamento de erros, retry logic | `*_controller.py` |
-| **Managers** | Factory Pattern - Centraliza instanciação de dependências | `*_manager.py` |
-| **Environment** | Isolamento de credenciais e configurações sensíveis | `env/keys.py` |
+| **Services** | Requisicoes a API Binance, transformacao em DataFrames, tratamento de erros, retry logic, validacao de dados | `binance_*_service.py` |
+| **Controllers** | Orquestracao de chamadas aos services, delegacao de responsabilidades | `*_controller.py` |
+| **Managers** | Factory Pattern - Centraliza instanciacao de dependencias com injecao de dependencias | `*_manager.py` |
+| **Environment** | Isolamento de credenciais e configuracoes sensiveis | `env/keys.py` |
 
 ---
 
