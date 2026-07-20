@@ -91,7 +91,7 @@ class BinanceMarketService:
         Returns:
             DataFrame com tickers USDT ordenados ou DataFrame vazio se falhar
         """
-        data = self.client.get_all_tickers()
+        data = self.client.get_tickers()
         if data:
             if isinstance(data, list) and len(data) > 0:
                 df = pd.DataFrame(data)
@@ -125,7 +125,7 @@ class BinanceMarketService:
 
         if not df_tickers.empty:
             for symbol in symbols:
-                data = self.client.get_ticker(symbol=symbol)
+                data = self.client.get_ticker_24hr(symbol=symbol)
                 if isinstance(data, dict):
                     data_list.append(data)
 
@@ -574,7 +574,7 @@ class BinanceMarketService:
             DataFrame com profundidade ou DataFrame vazio se falhar
         """
 
-        data = self.client.get_order_book(symbol=symbol)
+        data = self.client.get_depth(symbol=symbol)
         if data:
             update_id = data.get("lastUpdateId")
             df_bids = pd.DataFrame(data["bids"], columns=["price", "quantity"])
