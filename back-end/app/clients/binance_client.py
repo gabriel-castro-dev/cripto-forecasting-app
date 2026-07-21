@@ -128,7 +128,6 @@ class BinanceClient:
         Returns:
             Dicionário com dados 24h ou dicionário vazio se falhar
         """
-
         for attempt in range(self.MAX_RETRIES):
             try:
                 data = self.client.get_ticker(symbol=symbol)
@@ -149,11 +148,9 @@ class BinanceClient:
                     raise KeyError(
                         f"Failed to get ticker 24hr for {symbol}, invalid symbol provided."
                     )
-                logger.warning(f"Erro para {symbol}: {error_msg}")
-            except Exception as e:
-                error_msg = str(e)
+
                 logger.warning(
-                    f"[Tentativa {attempt + 1}/{self.MAX_RETRIES}] Erro: {error_msg}"
+                    f"[Tentativa {attempt + 1}/{self.MAX_RETRIES}] Erro para {symbol}: {error_msg}"
                 )
                 if attempt < self.MAX_RETRIES - 1:
                     time.sleep(self.RETRY_DELAY)
@@ -161,7 +158,7 @@ class BinanceClient:
         logger.error("Falha ao obter dados 24h após todas as tentativas")
         return {}
 
-    def get_orderbook_tickers(self, symbol: str | list) -> list:
+    def get_orderbook_tickers(self, symbol: str | list) -> list | dict:
         """
         Obtém informações de order book de um par.
 
@@ -169,13 +166,13 @@ class BinanceClient:
             symbol: Par de moedas (ex: 'BTCUSDT') ou lista de pares (ex: ['BTCUSDT', 'ETHUSDT'])
 
         Returns:
-            Lista com dados de order book ou lista vazia se falhar
+            Lista ou dicionário com dados de order book ou estrutura vazia se falhar
         """
-
         for attempt in range(self.MAX_RETRIES):
             try:
                 data = self.client.get_orderbook_tickers(symbol=symbol)
-                if isinstance(data, list):
+                # BUG CORRIGIDO: Se passar uma string, retorna dict. Se não, retorna lista.
+                if isinstance(data, (list, dict)):
                     return data
             except Exception as e:
                 error_msg = str(e)
@@ -399,7 +396,7 @@ class BinanceClient:
         for attempt in range(self.MAX_RETRIES):
             try:
                 data = self.client.get_recent_trades(symbol=symbol, limit=limit)
-                if isinstance(data, list) or isinstance(data, dict):
+                if isinstance(data, (list, dict)):
                     return data
             except Exception as e:
                 error_msg = str(e)
@@ -438,7 +435,7 @@ class BinanceClient:
         for attempt in range(self.MAX_RETRIES):
             try:
                 data = self.client.get_historical_trades(symbol=symbol)
-                if isinstance(data, list) or isinstance(data, dict):
+                if isinstance(data, (list, dict)):
                     return data
             except Exception as e:
                 error_msg = str(e)
