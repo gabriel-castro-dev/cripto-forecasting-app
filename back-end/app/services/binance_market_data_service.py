@@ -2,7 +2,7 @@ import logging
 from typing import Optional
 
 import pandas as pd
-from clients.binance_client import BinanceClient
+from app.clients.binance_client import BinanceClient
 
 logger = logging.getLogger(__name__)
 
@@ -55,11 +55,9 @@ class BinanceMarketService:
         Returns:
             Dict com timestamp ou mensagem de erro
         """
-
         result = self.client.server_time()
 
         if result is None:
-            # Retorna uma estrutura padrão de falha que seu controller entenda
             return {
                 "status": "error",
                 "message": "Não foi possível obter o horário do servidor.",
@@ -96,12 +94,11 @@ class BinanceMarketService:
             if isinstance(data, list) and len(data) > 0:
                 df = pd.DataFrame(data)
                 usdt_tickers = df[df["symbol"].str.endswith("USDT")].copy()
-                usdt_tickers["price"] = (
-                    usdt_tickers["price"]
-                    .astype(float, errors="coerce")
-                    .round(2)
-                    .dropna()
+                usdt_tickers["price"] = pd.to_numeric(
+                    usdt_tickers["price"], errors="coerce"
                 )
+                usdt_tickers["price"] = usdt_tickers["price"].round(2)
+                usdt_tickers = usdt_tickers.dropna(subset=["price"])
                 usdt_tickers = usdt_tickers.sort_values(
                     by="price", ascending=False
                 ).reset_index(drop=True)
@@ -118,7 +115,6 @@ class BinanceMarketService:
         Returns:
             DataFrame com dados 24h ou DataFrame vazio se falhar
         """
-
         df_tickers = self.get_tickers()
         symbols = df_tickers["symbol"].tolist()
         data_list = []
@@ -126,7 +122,7 @@ class BinanceMarketService:
         if not df_tickers.empty:
             for symbol in symbols:
                 data = self.client.get_ticker_24hr(symbol=symbol)
-                if isinstance(data, dict):
+                if isinstance(data, dict) and data:
                     data_list.append(data)
 
             if data_list:
@@ -142,9 +138,11 @@ class BinanceMarketService:
                 cols_to_numeric = [
                     col for col in df.columns if col not in ignorar_colunas
                 ]
-                df[cols_to_numeric] = (
-                    df[cols_to_numeric].astype(float, errors="coerce").round(8).dropna()
+                df[cols_to_numeric] = df[cols_to_numeric].apply(
+                    pd.to_numeric, errors="coerce"
                 )
+                df[cols_to_numeric] = df[cols_to_numeric].round(8)
+                df = df.dropna(subset=cols_to_numeric)
                 df["openTime"] = pd.to_datetime(df["openTime"], unit="ms")
                 df["closeTime"] = pd.to_datetime(df["closeTime"], unit="ms")
                 df[["symbol", "firstId", "lastId"]] = df[
@@ -170,18 +168,21 @@ class BinanceMarketService:
         Returns:
             DataFrame com dados de order book ou DataFrame vazio se falhar
         """
-
         data = self.client.get_orderbook_tickers(symbol=symbol)
 
         if data:
-            df = pd.DataFrame([data])
+            if isinstance(data, dict):
+                df = pd.DataFrame([data])
+            else:
+                df = pd.DataFrame(data)
+
             df["symbol"] = df["symbol"].astype(str)
-            df[["bidPrice", "bidQty", "askPrice", "askQty"]] = (
-                df[["bidPrice", "bidQty", "askPrice", "askQty"]]
-                .astype(float, errors="coerce")
-                .round(8)
-                .dropna()
-            )
+            cols = ["bidPrice", "bidQty", "askPrice", "askQty"]
+            # CORREÇÃO GLOBAL: Substituído astype por apply(pd.to_numeric) + dropna seguro
+            df[cols] = df[cols].apply(pd.to_numeric, errors="coerce")
+            df[cols] = df[cols].round(8)
+            df = df.dropna(subset=cols)
+
             logger.info(f"Order book obtido para {symbol}")
             return df
         else:
@@ -220,34 +221,22 @@ class BinanceMarketService:
             df["Open_Time"] = pd.to_datetime(df["Open_Time"], unit="ms")
             df["Close_Time"] = pd.to_datetime(df["Close_Time"], unit="ms")
             df["Number_of_Trades"] = df["Number_of_Trades"].astype(int)
-            df[
-                [
-                    "Open",
-                    "High",
-                    "Low",
-                    "Close",
-                    "Volume",
-                    "Quote_Asset_Volume",
-                    "Taker_Buy_Base_Asset_Volume",
-                    "Taker_Buy_Quote_Asset_Volume",
-                ]
-            ] = (
-                df[
-                    [
-                        "Open",
-                        "High",
-                        "Low",
-                        "Close",
-                        "Volume",
-                        "Quote_Asset_Volume",
-                        "Taker_Buy_Base_Asset_Volume",
-                        "Taker_Buy_Quote_Asset_Volume",
-                    ]
-                ]
-                .apply(pd.to_numeric, errors="coerce")
-                .round(8)
-                .dropna()
-            )
+
+            numeric_cols = [
+                "Open",
+                "High",
+                "Low",
+                "Close",
+                "Volume",
+                "Quote_Asset_Volume",
+                "Taker_Buy_Base_Asset_Volume",
+                "Taker_Buy_Quote_Asset_Volume",
+            ]
+            # CORREÇÃO GLOBAL: Separação do dropna para evitar desalinhamento de linhas
+            df[numeric_cols] = df[numeric_cols].apply(pd.to_numeric, errors="coerce")
+            df[numeric_cols] = df[numeric_cols].round(8)
+            df = df.dropna(subset=numeric_cols)
+
             logger.info(f"Obtidas {len(df)} k-lines para {symbol} ({interval})")
             return df
         else:
@@ -306,34 +295,22 @@ class BinanceMarketService:
                 "%d/%m/%Y %H:%M:%S"
             )
             df["Number_of_Trades"] = df["Number_of_Trades"].astype(int)
-            df[
-                [
-                    "Open",
-                    "High",
-                    "Low",
-                    "Close",
-                    "Volume",
-                    "Quote_Asset_Volume",
-                    "Taker_Buy_Base_Asset_Volume",
-                    "Taker_Buy_Quote_Asset_Volume",
-                ]
-            ] = (
-                df[
-                    [
-                        "Open",
-                        "High",
-                        "Low",
-                        "Close",
-                        "Volume",
-                        "Quote_Asset_Volume",
-                        "Taker_Buy_Base_Asset_Volume",
-                        "Taker_Buy_Quote_Asset_Volume",
-                    ]
-                ]
-                .astype(float, errors="coerce")
-                .round(8)
-                .dropna()
-            )
+
+            numeric_cols = [
+                "Open",
+                "High",
+                "Low",
+                "Close",
+                "Volume",
+                "Quote_Asset_Volume",
+                "Taker_Buy_Base_Asset_Volume",
+                "Taker_Buy_Quote_Asset_Volume",
+            ]
+            # CORREÇÃO GLOBAL: Substituído astype por apply(pd.to_numeric) e dropna seguro
+            df[numeric_cols] = df[numeric_cols].apply(pd.to_numeric, errors="coerce")
+            df[numeric_cols] = df[numeric_cols].round(8)
+            df = df.dropna(subset=numeric_cols)
+
             logger.info(f"Obtidas {len(df)} k-lines históricas para {symbol}")
             return df
         else:
@@ -383,34 +360,22 @@ class BinanceMarketService:
                 "%d/%m/%Y %H:%M:%S"
             )
             df["Number_of_Trades"] = df["Number_of_Trades"].astype(int)
-            df[
-                [
-                    "Open",
-                    "High",
-                    "Low",
-                    "Close",
-                    "Volume",
-                    "Quote_Asset_Volume",
-                    "Taker_Buy_Base_Asset_Volume",
-                    "Taker_Buy_Quote_Asset_Volume",
-                ]
-            ] = (
-                df[
-                    [
-                        "Open",
-                        "High",
-                        "Low",
-                        "Close",
-                        "Volume",
-                        "Quote_Asset_Volume",
-                        "Taker_Buy_Base_Asset_Volume",
-                        "Taker_Buy_Quote_Asset_Volume",
-                    ]
-                ]
-                .astype(float, errors="coerce")
-                .round(8)
-                .dropna()
-            )
+
+            numeric_cols = [
+                "Open",
+                "High",
+                "Low",
+                "Close",
+                "Volume",
+                "Quote_Asset_Volume",
+                "Taker_Buy_Base_Asset_Volume",
+                "Taker_Buy_Quote_Asset_Volume",
+            ]
+            # CORREÇÃO GLOBAL: Substituído astype por apply(pd.to_numeric) e dropna seguro
+            df[numeric_cols] = df[numeric_cols].apply(pd.to_numeric, errors="coerce")
+            df[numeric_cols] = df[numeric_cols].round(8)
+            df = df.dropna(subset=numeric_cols)
+
             logger.info(
                 f"Geradas {len(df)} k-lines históricas para {symbol} via generator"
             )
@@ -429,12 +394,16 @@ class BinanceMarketService:
         Returns:
             DataFrame com preço médio ou DataFrame vazio se falhar
         """
-
         data = self.client.get_avg_price(symbol=symbol)
         if data:
             df = pd.DataFrame([data])
             df["mins"] = df["mins"].astype(str)
-            df["price"] = df["price"].astype(float, errors="coerce").round(2).dropna()
+
+            # CORREÇÃO GLOBAL: Uso correto do pd.to_numeric
+            df["price"] = pd.to_numeric(df["price"], errors="coerce")
+            df["price"] = df["price"].round(2)
+            df = df.dropna(subset=["price"])
+
             df["closeTime"] = pd.to_datetime(df["closeTime"], unit="ms").dt.strftime(
                 "%d/%m/%Y %H:%M:%S"
             )
@@ -461,19 +430,26 @@ class BinanceMarketService:
         if data:
             df = pd.DataFrame(data)
             df["id"] = df["id"].astype(int)
-            df["price"] = df["price"].astype(float, errors="coerce").round(2).dropna()
-            df[["qty", "quoteQty"]] = (
-                df[["qty", "quoteQty"]].astype(float, errors="coerce").round(8).dropna()
+
+            # CORREÇÃO GLOBAL: Substituído astype por casting correto e dropna combinado
+            df["price"] = pd.to_numeric(df["price"], errors="coerce")
+            df["price"] = df["price"].round(2)
+
+            df[["qty", "quoteQty"]] = df[["qty", "quoteQty"]].apply(
+                pd.to_numeric, errors="coerce"
             )
+            df[["qty", "quoteQty"]] = df[["qty", "quoteQty"]].round(8)
+            df = df.dropna(subset=["price", "qty", "quoteQty"])
+
             df["time"] = pd.to_datetime(df["time"], unit="ms").dt.strftime(
                 "%d/%m/%Y %H:%M:%S"
             )
             df[["isBuyerMaker", "isBestMatch"]] = df[
                 ["isBuyerMaker", "isBestMatch"]
-            ].astype(bool, errors="ignore")
+            ].astype(bool)
+
             logger.info(f"Obtidos {len(df)} trades recentes para {symbol}")
             return df
-
         else:
             logger.error(f"Falha ao obter trades recentes para {symbol}")
             return pd.DataFrame()
@@ -488,7 +464,6 @@ class BinanceMarketService:
         Returns:
             DataFrame com trades históricos ou DataFrame vazio se falhar
         """
-
         data = self.client.get_historical_trades(symbol=symbol)
         if data:
             df = pd.DataFrame(data)
@@ -496,16 +471,24 @@ class BinanceMarketService:
             df = (
                 df.drop_duplicates(subset=["id"]).reset_index(drop=True).set_index("id")
             )
-            df["price"] = df["price"].astype(float, errors="coerce").round(2).dropna()
-            df[["qty", "quoteQty"]] = (
-                df[["qty", "quoteQty"]].astype(float, errors="coerce").round(8).dropna()
+
+            # CORREÇÃO GLOBAL: Substituído astype por casting correto e dropna combinado
+            df["price"] = pd.to_numeric(df["price"], errors="coerce")
+            df["price"] = df["price"].round(2)
+
+            df[["qty", "quoteQty"]] = df[["qty", "quoteQty"]].apply(
+                pd.to_numeric, errors="coerce"
             )
+            df[["qty", "quoteQty"]] = df[["qty", "quoteQty"]].round(8)
+            df = df.dropna(subset=["price", "qty", "quoteQty"])
+
             df["time"] = pd.to_datetime(df["time"], unit="ms").dt.strftime(
                 "%d/%m/%Y %H:%M:%S"
             )
             df[["isBuyerMaker", "isBestMatch"]] = df[
                 ["isBuyerMaker", "isBestMatch"]
-            ].astype(bool, errors="ignore")
+            ].astype(bool)
+
             logger.info(f"Obtidos {len(df)} trades históricos para {symbol}")
             return df
         else:
@@ -522,7 +505,6 @@ class BinanceMarketService:
         Returns:
             DataFrame com trades agregados ou DataFrame vazio se falhar
         """
-
         data = self.client.get_aggregate_trades(symbol=symbol)
         if data:
             df = pd.DataFrame(data)
@@ -544,10 +526,15 @@ class BinanceMarketService:
                 .reset_index(drop=True)
                 .set_index("Aggregate_Trade_Id")
             )
-            df["price"] = df["price"].astype(float, errors="coerce").round(2).dropna()
-            df["Quantity"] = (
-                df["Quantity"].astype(float, errors="coerce").round(8).dropna()
-            )
+
+            # CORREÇÃO GLOBAL: Substituído astype por casting correto e dropna combinado
+            df["price"] = pd.to_numeric(df["price"], errors="coerce")
+            df["price"] = df["price"].round(2)
+
+            df["Quantity"] = pd.to_numeric(df["Quantity"], errors="coerce")
+            df["Quantity"] = df["Quantity"].round(8)
+            df = df.dropna(subset=["price", "Quantity"])
+
             df[["First_Trade_Id", "Last_Trade_Id"]] = df[
                 ["First_Trade_Id", "Last_Trade_Id"]
             ].astype(int)
@@ -556,7 +543,8 @@ class BinanceMarketService:
             )
             df[["isBuyerMaker", "isBestMatch"]] = df[
                 ["isBuyerMaker", "isBestMatch"]
-            ].astype(bool, errors="ignore")
+            ].astype(bool)
+
             logger.info(f"Obtidos {len(df)} trades agregados para {symbol}")
             return df
         else:
@@ -573,7 +561,6 @@ class BinanceMarketService:
         Returns:
             DataFrame com profundidade ou DataFrame vazio se falhar
         """
-
         data = self.client.get_depth(symbol=symbol)
         if data:
             update_id = data.get("lastUpdateId")
@@ -583,8 +570,10 @@ class BinanceMarketService:
             df_asks["side"] = "ask"
             df_full = pd.concat([df_bids, df_asks], ignore_index=True)
             df_full["lastUpdateId"] = update_id
-            df_full[["price", "quantity"]] = df_full[["price", "quantity"]].astype(
-                float
+
+            # CORREÇÃO: Casting seguro de tipos numéricos usando apply(pd.to_numeric)
+            df_full[["price", "quantity"]] = df_full[["price", "quantity"]].apply(
+                pd.to_numeric, errors="coerce"
             )
             logger.info(f"Profundidade de mercado obtida para {symbol}")
             return df_full
