@@ -40,11 +40,12 @@ jobs:
 
       - name: Rodar Job Horário
         run: |
-          docker run --network host \
+          docker run \
             -e SUPABASE_URL="${{ secrets.SUPABASE_URL }}" \
             -e SUPABASE_KEY="${{ secrets.SUPABASE_KEY }}" \
             -e BINANCE_API_KEY="${{ secrets.BINANCE_API_KEY }}" \
             -e BINANCE_API_SECRET="${{ secrets.BINANCE_API_SECRET }}" \
+            -e BINANCE_PROXY="${{ secrets.BINANCE_PROXY }}" \
             crypto-jobs uv run python jobs.py hourly
 
   daily-job:
@@ -58,21 +59,16 @@ jobs:
       - name: Baixar Código do Repositório
         uses: actions/checkout@v4
 
-      - name: Activar Cloudflare WARP (Bypass Geoblock)
-        uses: fscarmen/warp-on-actions@v1.4
-        with:
-          stack: dual
-          mode: wireguard
-
       - name: Build da Imagem Docker
         working-directory: back-end
         run: docker build -t crypto-jobs -f Dockerfile.jobs .
 
       - name: Rodar Job Diário
         run: |
-          docker run --network host \
+          docker run \
             -e SUPABASE_URL="${{ secrets.SUPABASE_URL }}" \
             -e SUPABASE_KEY="${{ secrets.SUPABASE_KEY }}" \
             -e BINANCE_API_KEY="${{ secrets.BINANCE_API_KEY }}" \
             -e BINANCE_API_SECRET="${{ secrets.BINANCE_API_SECRET }}" \
+            -e BINANCE_PROXY="${{ secrets.BINANCE_PROXY }}" \
             crypto-jobs uv run python jobs.py daily

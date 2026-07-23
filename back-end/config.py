@@ -1,4 +1,5 @@
 import logging
+from typing import Optional
 
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -12,6 +13,7 @@ class Settings(BaseSettings):
     BINANCE_API_KEY: str
     BINANCE_API_SECRET: str
     USE_TESTNET: bool = True
+    BINANCE_PROXY: Optional[str] = None
 
     @field_validator("BINANCE_API_KEY", "BINANCE_API_SECRET", "SUPABASE_KEY")
     @classmethod

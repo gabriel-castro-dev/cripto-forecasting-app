@@ -32,8 +32,21 @@ class BinanceClient:
             self.api_key: str = settings.BINANCE_API_KEY
             self.api_secret: str = settings.BINANCE_API_SECRET
             self.test_net: bool = settings.USE_TESTNET
+
+            requests_params = None
+            if settings.BINANCE_PROXY:
+                requests_params = {
+                    "proxies": {
+                        "http": settings.BINANCE_PROXY,
+                        "https": settings.BINANCE_PROXY,
+                    }
+                }
+
             self.client: Client = Client(
-                self.api_key, self.api_secret, testnet=self.test_net
+                self.api_key,
+                self.api_secret,
+                testnet=self.test_net,
+                requests_params=requests_params,
             )
             self.MAX_RETRIES = settings.MAX_RETRIES
             self.RETRY_DELAY = settings.RETRY_DELAY
