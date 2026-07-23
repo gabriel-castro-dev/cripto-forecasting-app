@@ -1,3 +1,4 @@
+import pandas as pd
 from app.clients.supabase_client import get_supabase_client
 from app.services.binance_market_data_service import BinanceMarketService
 
@@ -62,4 +63,37 @@ class CryptoForecastRepository:
 
             except Exception as e:
                 print(f"Erro ao salvar os tickers de 24h no Supabase: {e}")
+                return None
+
+    def save_orderbook_tickers(self):
+        df = self.binance_service.get_orderbook_tickers()
+        if df.empty:
+            return
+        else:
+            df_prep = df.copy()
+            df_prep = df_prep.rename(
+                columns={
+                    "symbol": "symbol",
+                    "bidPrice": "bid_price",
+                    "bidQty": "bid_qty",
+                    "askPrice": "ask_price",
+                    "askQty": "ask_qty",
+                }
+            )
+            df_prep["fetched_at"] = pd.Timestamp.now(tz="UTC").strftime(
+                "%Y-%m-%d %H:%M:%S"
+            )
+            dados_para_salvar = df_prep.to_dict(orient="records")
+            try:
+                response = (
+                    self.supabase.table("orderbook_tickers")
+                    .upsert(dados_para_salvar, on_conflict="symbol,fetched_at")
+                    .execute()
+                )
+                print(
+                    f"Sucesso! {len(dados_para_salvar)} registros de orderbook salvos/atualizados no Supabase."
+                )
+                return response
+            except Exception as e:
+                print(f"Erro ao salvar os orderbook no Supabase: {e}")
                 return None

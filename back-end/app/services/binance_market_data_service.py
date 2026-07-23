@@ -158,24 +158,28 @@ class BinanceMarketService:
             logger.error("Falha ao obter lista de tickers USDT")
             return pd.DataFrame()
 
-    def get_orderbook_tickers(self, symbol: str) -> pd.DataFrame:
+    def get_orderbook_tickers(self) -> pd.DataFrame:
         """
-        Obtém informações de order book de um par.
-
-        Args:
-            symbol: Par de moedas (ex: 'BTCUSDT')
+        Obtém informações de order book dos pares USDT.
 
         Returns:
             DataFrame com dados de order book ou DataFrame vazio se falhar
         """
-        data = self.client.get_orderbook_tickers(symbol=symbol)
 
-        if data:
-            if isinstance(data, dict):
-                df = pd.DataFrame([data])
-            else:
-                df = pd.DataFrame(data)
+        df_tickers = self.get_tickers()
+        symbols = df_tickers["symbol"].tolist()
+        data_list = []
 
+        if not df_tickers.empty:
+            for symbol in symbols:
+                data = self.client.get_orderbook_tickers(symbol=symbol)
+                if isinstance(data, dict) and data:
+                    data_list.append(data)
+                    logger.info(f"Order book obtido para {symbol}")
+                else:
+                    logger.error(f"Falha ao obter order book para {symbol}")
+        if data_list:
+            df = pd.DataFrame(data_list)
             df["symbol"] = df["symbol"].astype(str)
             cols = ["bidPrice", "bidQty", "askPrice", "askQty"]
 
@@ -183,10 +187,10 @@ class BinanceMarketService:
             df[cols] = df[cols].round(8)
             df = df.dropna(subset=cols)
 
-            logger.info(f"Order book obtido para {symbol}")
+            logger.info(f"Order book obtido para {len(symbols)} símbolos")
             return df
         else:
-            logger.error(f"Falha ao obter order book para {symbol}")
+            logger.error(f"Falha ao obter order book para {len(symbols)} símbolos")
             return pd.DataFrame()
 
     def get_klines(self, symbol: str, interval: str) -> pd.DataFrame:

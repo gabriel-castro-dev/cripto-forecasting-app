@@ -184,7 +184,6 @@ class BinanceClient:
         for attempt in range(self.MAX_RETRIES):
             try:
                 data = self.client.get_orderbook_tickers(symbol=symbol)
-                # BUG CORRIGIDO: Se passar uma string, retorna dict. Se não, retorna lista.
                 if isinstance(data, (list, dict)):
                     return data
             except Exception as e:
