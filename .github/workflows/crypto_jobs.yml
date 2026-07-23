@@ -40,7 +40,7 @@ jobs:
 
       - name: Rodar Job Horário
         run: |
-          docker run \
+          docker run --network host \
             -e SUPABASE_URL="${{ secrets.SUPABASE_URL }}" \
             -e SUPABASE_KEY="${{ secrets.SUPABASE_KEY }}" \
             -e BINANCE_API_KEY="${{ secrets.BINANCE_API_KEY }}" \
@@ -70,7 +70,7 @@ jobs:
 
       - name: Rodar Job Diário
         run: |
-          docker run \
+          docker run --network host \
             -e SUPABASE_URL="${{ secrets.SUPABASE_URL }}" \
             -e SUPABASE_KEY="${{ secrets.SUPABASE_KEY }}" \
             -e BINANCE_API_KEY="${{ secrets.BINANCE_API_KEY }}" \
