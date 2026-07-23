@@ -13,6 +13,7 @@ on:
         default: 'hourly'
         type: choice
         options:
+          - five-minutes
           - hourly
           - daily
 
@@ -47,7 +48,7 @@ jobs:
             -e BINANCE_API_SECRET="${{ secrets.BINANCE_API_SECRET }}" \
             -e BINANCE_PROXY="${{ secrets.BINANCE_PROXY }}" \
             crypto-jobs uv run python jobs.py five-minutes
-            
+
   hourly-job:
     name: Executar Coleta Horária
     if: |
