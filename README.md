@@ -71,6 +71,54 @@ Usuário
 
 ---
 
+## Schema do Banco de Dados (Supabase / PostgreSQL)
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ symbols (tabela referencial)                                    │
+│ ├─ PK symbol: text                                              │
+│ └─ created_at: timestamptz                                      │
+└──────┬──────────────────────────────────────────────────────────┘
+       │ FK
+       ├──────────────────────────────────────────────────────┐
+       │                                                      │
+       ▼                                                      ▼
+┌─────────────────────────────────────┐    ┌──────────────────────────────────────┐
+│ klines_15m / klines_1h / klines_1d  │    │ ticker_24hr_history                  │
+│ (OHLCV bruto — top 20 ativos)       │    │ (24h summary — todos os ativos)      │
+├─────────────────────────────────────┤    ├──────────────────────────────────────┤
+│ PK id: bigint                       │    │ PK id: bigint                        │
+│ symbol: text FK                     │    │ symbol: text FK                      │
+│ open_time / close_time: timestamp   │    │ open_time / close_time: timestamp    │
+│ open / high / low / close: numeric  │    │ price_change / price_change_percent  │
+│ volume: numeric                     │    │ weighted_avg_price / prev_close_price│
+│ quote_asset_volume: numeric         │    │ last_price / last_qty                │
+│ number_of_trades: integer           │    │ bid_price -> ask_qty                 │
+│ taker_buy_*: numeric                │    │ open_price -> low_price              │
+└─────────────────────────────────────┘    │ volume / quote_volume                │
+                                           │ first_id / last_id / count           │
+┌─────────────────────────────────────┐    └──────────────────────────────────────┘
+│ orderbook_tickers                   │    ┌─────────────────────────────────────┐
+│ (bid/ask — top 20 ativos, 5min)     │    │ features_klines                     │
+├─────────────────────────────────────┤    │ (indicadores calculados — top 20)   │
+│ PK id: bigint                       │    ├─────────────────────────────────────┤
+│ symbol: text FK                     │    │ PK (symbol, timestamp, interval)    │
+│ bid_price / bid_qty: numeric        │    │ symbol: text FK                     │
+│ ask_price / ask_qty: numeric        │    │ timestamp: timestamptz              │
+│ fetched_at: timestamptz             │    │ interval: text (15m/1h/1d)          │
+└─────────────────────────────────────┘    │ sma_20 / sma_50 / sma_200: numeric  │
+                                           │ ema_12 / ema_26: numeric            │
+                                           │ rsi_14: numeric                     │
+                                           │ bb_upper/middle/lower: numeric      │
+                                           │ atr_14: numeric                     │
+                                           │ volume_sma_20: numeric              │
+                                           └─────────────────────────────────────┘
+```
+
+> Coleta restrita ao **top 20 ativos por volume 24h** (exceto `ticker_24hr_history` que coleta todos para rankear). `features_klines` armazena indicadores calculados a partir dos dados brutos — é a tabela de entrada para os modelos de ML.
+
+---
+
 ## Estrutura do Monorepo
 
 ```text
@@ -83,7 +131,14 @@ crypto-market-platform/
 │   │   ├── clients/                 # Conexões externas (Binance, Supabase)
 │   │   ├── controllers/             # Orquestração das rotas de entrada
 │   │   ├── repositories/            # Camada de persistência/consultas SQL
-│   │   └── services/                # Regras de negócio e cálculos matemáticos
+│   │   ├── services/                # Regras de negócio e cálculos matemáticos
+│   │   └── feature_engineering/     # Pipeline offline de features + retenção
+│   │       ├── config/              # features.yaml
+│   │       ├── pipelines/           # Orquestração por tabela (orderbook, klines, etc.)
+│   │       ├── transforms/          # Indicadores técnicos (SMA, RSI, Bollinger, etc.)
+│   │       ├── downsample/          # Resample 5min→1h, 1h→1d
+│   │       └── retention/           # Limpeza programada por retenção
+│   │                                # (usa repositories/ para ler/escrever)
 │   ├── main.py                      # Inicialização do servidor FastAPI
 │   ├── config.py                    # Classe de Settings Pydantic
 │   └── pyproject.toml               # Dependências da API via 'uv'
